@@ -59,10 +59,33 @@ defmodule Ueberauth.Strategy.ADFS.OAuth do
       |> Client.authorize_url!(params)
   end
 
-  def get_token!(params \\ [], opts \\ []) do
+  def signout_url(params \\ %{}) do
+    config = Application.get_env(:ueberauth, __MODULE__)
+
+    with {value, _} when not is_nil(value) <- Keyword.pop(config, :adfs_url) do
+      adfs_url = URI.parse(value)
+      signout_return_address = Map.get(params, :redirect_uri)
+
+      redirect = case signout_return_address do
+        nil -> "adfs/ls/?wa=wsignout1.0"
+        address -> "adfs/ls/?wa=wsignout1.0&wreply=#{address}"
+      end
+
+      {
+        :ok,
+        adfs_url
+          |> URI.merge(redirect)
+          |> URI.to_string()
+      }
+    else
+      _ -> {:error, :failed_to_logout}
+    end
+  end
+
+  def send_token_request(params \\ [], opts \\ []) do
     opts
       |> client
-      |> Client.get_token!(params)
+      |> Client.get_token(params)
   end
 
   # oauth2 Strategy Callbacks
