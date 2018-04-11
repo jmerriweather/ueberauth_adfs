@@ -1,18 +1,42 @@
 defmodule UeberauthAdfs.MixProject do
   use Mix.Project
 
+  @version "0.1.0"
+  @url "https://github.com/jmerriweather/ueberauth_adfs"
+  @maintainers ["Jonathan Merriweather"]
+
   def project do
     [
       app: :ueberauth_adfs,
-      version: "0.1.0",
+      version: @version,
       elixir: "~> 1.6",
-      start_permanent: Mix.env() == :prod,
+      build_embedded: Mix.env == :prod,
+      start_permanent: Mix.env == :prod,
       deps: deps(),
-
       name: "Ueberauth ADFS",
-      source_url: "https://github.com/jmerriweather/ueberauth_adfs",
-      docs: [main: "Ueberauth ADFS", # The main page in the docs
-             extras: ["README.md"]]
+      description: "ADFS Strategy for Überauth",
+      source_url: @url,
+      homepage_url: @url,
+      package: package(),
+      deps: deps(),
+      docs: docs()
+    ]
+  end
+
+  def package do
+    [
+      maintainers: @maintainers,
+      licenses: ["MIT"],
+      links: %{"GitHub" => @url},
+      files: ~w(lib) ++ ~w(LICENSE.md mix.exs README.md)
+    ]
+  end
+
+  def docs do
+    [
+      extras: ["README.md", "LICENSE.md"],
+      source_ref: "v#{@version}",
+      main: "readme"
     ]
   end
 
@@ -29,6 +53,7 @@ defmodule UeberauthAdfs.MixProject do
       {:oauth2, "~> 0.9"},
       {:ueberauth, "~> 0.5"},
       {:joken, "~> 1.5"},
+      {:earmark, "~> 1.2", only: :dev, runtime: false},
       {:ex_doc, "~> 0.16", only: :dev, runtime: false}
     ]
   end
