@@ -1,8 +1,8 @@
 defmodule Ueberauth.Strategy.ADFS do
   use Ueberauth.Strategy,
-    adfs_signing_certificate: "priv/sign-certificate.pem",
+    adfs_signing_certificate: "path/to/FederationMetadata.xml",
     resource_identifier: "unknown",
-    uid_field: "sid"
+    uid_field: "email"
 
   alias Ueberauth.Auth.{Info, Credentials, Extra}
   alias Ueberauth.Strategy.ADFS.OAuth
@@ -11,10 +11,11 @@ defmodule Ueberauth.Strategy.ADFS do
   Handles initial request for ADFS authentication.
   """
   def handle_request!(conn) do
-    authorize_url = conn.params
+    authorize_url =
+      conn.params
       |> Map.put(:resource, option(conn, :resource_identifier))
       |> Map.put(:redirect_uri, callback_url(conn))
-      |> OAuth.authorize_url!
+      |> OAuth.authorize_url!()
 
     redirect!(conn, authorize_url)
   end
@@ -25,7 +26,8 @@ defmodule Ueberauth.Strategy.ADFS do
     with {:ok, signout_url} <- OAuth.signout_url(params) do
       redirect!(conn, signout_url)
     else
-      _ -> set_errors!(conn, [error("Logout Failed", "Failed to logout, please close your browser")])
+      _ ->
+        set_errors!(conn, [error("Logout Failed", "Failed to logout, please close your browser")])
     end
   end
 
@@ -40,6 +42,7 @@ defmodule Ueberauth.Strategy.ADFS do
     else
       {:error, %{reason: reason}} ->
         set_errors!(conn, [error("Authentication Error", reason)])
+
       {:error, %OAuth2.Response{body: %{"error_description" => reason}}} ->
         set_errors!(conn, [error("Authentication Error", reason)])
     end
@@ -48,7 +51,9 @@ defmodule Ueberauth.Strategy.ADFS do
   @doc """
   Handles error callback from ADFS.
   """
-  def handle_callback!(%Plug.Conn{params: %{"error" => error, "error_description" => error_description}} = conn) do
+  def handle_callback!(
+        %Plug.Conn{params: %{"error" => error, "error_description" => error_description}} = conn
+      ) do
     set_errors!(conn, [error(error, error_description)])
   end
 
@@ -60,12 +65,13 @@ defmodule Ueberauth.Strategy.ADFS do
   @doc false
   def handle_cleanup!(conn) do
     conn
-      |> put_private(:adfs_token, nil)
-      |> put_private(:adfs_claims, nil)
+    |> put_private(:adfs_token, nil)
+    |> put_private(:adfs_claims, nil)
   end
 
   def uid(conn) do
-    user = conn
+    user =
+      conn
       |> option(:uid_field)
       |> to_string
 
@@ -79,8 +85,8 @@ defmodule Ueberauth.Strategy.ADFS do
       expires: token.claims["exp"] != nil,
       expires_at: token.claims["exp"],
       scopes: token.claims["aud"],
-      token: token.token,
-      #token_type: token.token_type
+      token: token.token
+      # token_type: token.token_type
     }
   end
 
@@ -108,17 +114,18 @@ defmodule Ueberauth.Strategy.ADFS do
 
   defp fetch_user(conn, %{token: %{access_token: access_token}}) do
     adfs_signing_certificate = option(conn, :adfs_signing_certificate)
-    key = JOSE.JWK.from_pem_file(adfs_signing_certificate) |> Joken.rs256()
+    key = JOSE.JWK.from_pem(adfs_signing_certificate) |> Joken.rs256()
 
     # TODO: Peek header and check algo
-    jwt = access_token
+    jwt =
+      access_token
       |> Joken.token()
       |> Joken.with_signer(key)
-      |> Joken.verify
+      |> Joken.verify()
 
     conn = put_private(conn, :adfs_token, jwt)
 
-    with %Joken.Token{ claims: claims } <- jwt do
+    with %Joken.Token{claims: claims} <- jwt do
       put_private(conn, :adfs_claims, claims)
     else
       _ -> set_errors!(conn, [error("token", "unauthorized")])
@@ -129,7 +136,7 @@ defmodule Ueberauth.Strategy.ADFS do
     default = Keyword.get(default_options(), key)
 
     conn
-      |> options
-      |> Keyword.get(key, default)
+    |> options
+    |> Keyword.get(key, default)
   end
 end
