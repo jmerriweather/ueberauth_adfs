@@ -7,7 +7,7 @@ The package can be installed by adding `ueberauth_adfs` to your list of dependen
 ```elixir
 def deps do
   [
-    {:ueberauth_adfs, "~> 0.1.0"}
+    {:ueberauth_adfs, git: "https://github.com/Kuret/ueberauth_adfs.git"}
   ]
 end
 ```
@@ -45,7 +45,7 @@ Docs can be found at [https://hexdocs.pm/ueberauth_adfs](https://hexdocs.pm/uebe
   providers: [
     adfs: { Ueberauth.Strategy.ADFS,
       [
-        adfs_signing_certificate: "priv/token-signing-cert-public.pem",
+        adfs_metadata_url: "https://path.to/FederationMetadata.xml",
         resource_identifier: "http://localhost:4000/auth/adfs"
       ]
     }
