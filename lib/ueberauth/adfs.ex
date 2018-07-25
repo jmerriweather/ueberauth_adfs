@@ -149,7 +149,7 @@ defmodule Ueberauth.Strategy.ADFS do
 
   defp cert_from_metadata(metadata) when is_binary(metadata) do
     metadata
-    |> xpath(~x"//EntityDescriptor/ds:Signature/KeyInfo/X509Data/X509Certificate/text()")
+    |> xpath(~x"//EntityDescriptor/ds:Signature/KeyInfo/X509Data/X509Certificate/text()"s)
     |> build_cert()
   end
 
