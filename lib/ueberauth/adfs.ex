@@ -1,25 +1,21 @@
 defmodule Ueberauth.Strategy.ADFS do
+  @moduledoc """
+  ADFS Strategy for Überauth.
+  """
+
   import SweetXml
 
-  use Ueberauth.Strategy,
-    adfs_metadata_url: "https://path.to/FederationMetadata.xml",
-    resource_identifier: "unknown",
-    uid_field: "sid"
+  use Ueberauth.Strategy
 
   alias Ueberauth.Auth.{Info, Credentials, Extra}
   alias Ueberauth.Strategy.ADFS.OAuth
 
-  @doc """
-  Handles initial request for ADFS authentication.
-  """
   def handle_request!(conn) do
-    authorize_url =
-      conn.params
-      |> Map.put(:resource, option(conn, :resource_identifier))
-      |> Map.put(:redirect_uri, callback_url(conn))
-      |> OAuth.authorize_url!()
-
-    redirect!(conn, authorize_url)
+    if __MODULE__.configured?() do
+      redirect_to_authorization(conn)
+    else
+      redirect!(conn, "/")
+    end
   end
 
   def logout(conn, token) do
@@ -33,13 +29,8 @@ defmodule Ueberauth.Strategy.ADFS do
     end
   end
 
-  @doc """
-  Handles the callback from ADFS.
-  """
   def handle_callback!(%Plug.Conn{params: %{"code" => code}} = conn) do
-    opts = [redirect_uri: callback_url(conn)]
-
-    with {:ok, client} <- OAuth.send_token_request([code: code], opts) do
+    with {:ok, client} <- OAuth.get_token(code, redirect_uri: callback_url(conn)) do
       fetch_user(conn, client)
     else
       {:error, %{reason: reason}} ->
@@ -50,72 +41,64 @@ defmodule Ueberauth.Strategy.ADFS do
     end
   end
 
-  @doc """
-  Handles error callback from ADFS.
-  """
   def handle_callback!(
         %Plug.Conn{params: %{"error" => error, "error_description" => error_description}} = conn
       ) do
     set_errors!(conn, [error(error, error_description)])
   end
 
-  @doc false
   def handle_callback!(conn) do
     set_errors!(conn, [error("missing_code", "No code received")])
   end
 
-  @doc false
   def handle_cleanup!(conn) do
     conn
+    |> put_private(:adfs_user, nil)
     |> put_private(:adfs_token, nil)
-    |> put_private(:adfs_claims, nil)
   end
 
   def uid(conn) do
-    user =
+    uid_field =
       conn
       |> option(:uid_field)
       |> to_string
 
-    conn.private.adfs_claims[user]
+    conn.private.adfs_user[uid_field]
   end
 
   def credentials(conn) do
     token = conn.private.adfs_token
 
-    %Credentials{
-      expires: token.claims["exp"] != nil,
-      expires_at: token.claims["exp"],
-      scopes: token.claims["aud"],
-      token: token.token
-      # token_type: token.token_type
-    }
+    %Credentials{token: token.access_token}
   end
 
   def info(conn) do
-    claims = conn.private.adfs_claims
+    user = conn.private.adfs_user
 
     %Info{
-      nickname: claims["winaccountname"],
-      name: "#{claims["given_name"]} #{claims["family_name"]}",
-      email: claims["email"],
-      first_name: claims["given_name"],
-      last_name: claims["family_name"]
+      name: "#{user["given_name"]} #{user["family_name"]}",
+      nickname: user["winaccountname"],
+      email: user["email"]
     }
   end
 
   def extra(conn) do
     %Extra{
       raw_info: %{
-        token: conn.private.adfs_token,
-        claims: conn.private.adfs_claims,
-        groups: conn.private.adfs_claims["groups"]
+        token: conn.private[:adfs_token],
+        user: conn.private[:adfs_user]
       }
     }
   end
 
+  def configured? do
+    :ueberauth
+    |> Application.get_env(__MODULE__)
+    |> env_present?
+  end
+
   defp fetch_user(conn, %{token: %{access_token: access_token}}) do
-    url = option(conn, :adfs_metadata_url)
+    url = config(:adfs_metadata_url)
 
     with {:ok, %HTTPoison.Response{body: metadata}} <-
            HTTPoison.get(url, [], ssl: [versions: [:"tlsv1.2"]]),
@@ -126,7 +109,6 @@ defmodule Ueberauth.Strategy.ADFS do
         |> JOSE.JWK.from_pem()
         |> Joken.rs256()
 
-      # TODO: Peek header and check algo
       jwt =
         access_token
         |> Joken.token()
@@ -167,10 +149,32 @@ defmodule Ueberauth.Strategy.ADFS do
   defp build_cert(_), do: {:error, :cert_not_found}
 
   defp option(conn, key) do
-    default = Keyword.get(default_options(), key)
-
-    conn
-    |> options
-    |> Keyword.get(key, default)
+    Keyword.get(options(conn), key, Keyword.get(default_options(), key))
   end
+
+  defp config(option) do
+    :ueberauth
+    |> Application.get_env(__MODULE__)
+    |> Keyword.get(option)
+  end
+
+  defp redirect_to_authorization(conn) do
+    authorize_url =
+      conn.params
+      |> Map.put(:resource, config(:resource_identifier))
+      |> Map.put(:redirect_uri, callback_url(conn))
+      |> OAuth.authorize_url!()
+
+    redirect!(conn, authorize_url)
+  end
+
+  defp env_present?(
+         [adfs_url: _, adfs_metadata_url: _, client_id: _, resource_identifier: _] = env
+       ) do
+    env
+    |> Keyword.values()
+    |> Enum.all?(&(byte_size(&1 || <<>>) > 0))
+  end
+
+  defp env_present?(_), do: false
 end
