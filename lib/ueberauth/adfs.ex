@@ -1,8 +1,10 @@
 defmodule Ueberauth.Strategy.ADFS do
+  import SweetXml
+
   use Ueberauth.Strategy,
-    adfs_signing_certificate: "path/to/FederationMetadata.xml",
+    adfs_metadata_url: "https://path.to/FederationMetadata.xml",
     resource_identifier: "unknown",
-    uid_field: "email"
+    uid_field: "sid"
 
   alias Ueberauth.Auth.{Info, Credentials, Extra}
   alias Ueberauth.Strategy.ADFS.OAuth
@@ -113,24 +115,56 @@ defmodule Ueberauth.Strategy.ADFS do
   end
 
   defp fetch_user(conn, %{token: %{access_token: access_token}}) do
-    adfs_signing_certificate = option(conn, :adfs_signing_certificate)
-    key = JOSE.JWK.from_pem(adfs_signing_certificate) |> Joken.rs256()
+    url = option(conn, :adfs_metadata_url)
 
-    # TODO: Peek header and check algo
-    jwt =
-      access_token
-      |> Joken.token()
-      |> Joken.with_signer(key)
-      |> Joken.verify()
+    with {:ok, %HTTPoison.Response{body: metadata}} <-
+           HTTPoison.get(url, [], ssl: [versions: [:"tlsv1.2"]]),
+         true <- String.starts_with?(metadata, "<EntityDescriptor"),
+         {:ok, certificate} <- cert_from_metadata(metadata) do
+      key =
+        certificate
+        |> JOSE.JWK.from_pem()
+        |> Joken.rs256()
 
-    conn = put_private(conn, :adfs_token, jwt)
+      # TODO: Peek header and check algo
+      jwt =
+        access_token
+        |> Joken.token()
+        |> Joken.with_signer(key)
+        |> Joken.verify()
 
-    with %Joken.Token{claims: claims} <- jwt do
-      put_private(conn, :adfs_claims, claims)
+      conn = put_private(conn, :adfs_token, jwt)
+
+      with %Joken.Token{claims: claims} <- jwt do
+        put_private(conn, :adfs_claims, claims)
+      else
+        _ -> set_errors!(conn, [error("token", "unauthorized")])
+      end
     else
-      _ -> set_errors!(conn, [error("token", "unauthorized")])
+      {:error, :metadata_not_found} -> set_errors!(conn, [error("metadata", "not_found")])
+      {:error, :cert_not_found} -> set_errors!(conn, [error("certificate", "not_found")])
+      _ -> set_errors!(conn, [error("metadata", "unkown")])
     end
   end
+
+  defp cert_from_metadata(metadata) when is_binary(metadata) do
+    metadata
+    |> xpath(~x"//EntityDescriptor/ds:Signature/KeyInfo/X509Data/X509Certificate/text()")
+    |> build_cert()
+  end
+
+  defp cert_from_metadata(_), do: {:error, :metadata_not_found}
+
+  defp build_cert(cert_content) when is_binary(cert_content) do
+    {:ok,
+     """
+     -----BEGIN CERTIFICATE-----
+     #{cert_content}
+     -----END CERTIFICATE-----
+     """}
+  end
+
+  defp build_cert(_), do: {:error, :cert_not_found}
 
   defp option(conn, key) do
     default = Keyword.get(default_options(), key)
