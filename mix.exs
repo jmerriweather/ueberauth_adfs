@@ -10,8 +10,8 @@ defmodule UeberauthAdfs.MixProject do
       app: :ueberauth_adfs,
       version: @version,
       elixir: "~> 1.6",
-      build_embedded: Mix.env == :prod,
-      start_permanent: Mix.env == :prod,
+      build_embedded: Mix.env() == :prod,
+      start_permanent: Mix.env() == :prod,
       deps: deps(),
       name: "Ueberauth ADFS",
       description: "ADFS Strategy for Überauth",
@@ -50,11 +50,13 @@ defmodule UeberauthAdfs.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:oauth2, "~> 0.9"},
-      {:ueberauth, "~> 0.5"},
-      {:joken, "~> 1.5"},
       {:earmark, "~> 1.2", only: :dev, runtime: false},
-      {:ex_doc, "~> 0.16", only: :dev, runtime: false}
+      {:ex_doc, "~> 0.16", only: :dev, runtime: false},
+      {:httpoison, "~> 1.0"},
+      {:joken, "~> 1.5"},
+      {:oauth2, "~> 0.9"},
+      {:sweet_xml, "~> 0.6"},
+      {:ueberauth, "~> 0.5"}
     ]
   end
 end
