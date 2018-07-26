@@ -69,7 +69,7 @@ defmodule Ueberauth.Strategy.ADFS do
   def credentials(conn) do
     token = conn.private.adfs_token
 
-    %Credentials{token: token.access_token}
+    %Credentials{token: token.token}
   end
 
   def info(conn) do
@@ -117,8 +117,8 @@ defmodule Ueberauth.Strategy.ADFS do
 
       conn = put_private(conn, :adfs_token, jwt)
 
-      with %Joken.Token{claims: claims} <- jwt do
-        put_private(conn, :adfs_claims, claims)
+      with %Joken.Token{claims: claims_user} <- jwt do
+        put_private(conn, :adfs_user, claims_user)
       else
         _ -> set_errors!(conn, [error("token", "unauthorized")])
       end

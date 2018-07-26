@@ -26,7 +26,7 @@ defmodule Ueberauth.Strategy.ADFS.OAuth do
   ]
 
   def client(opts \\ []) do
-    config = Application.get_env(:ueberauth, Ueberauth.Strategy.ADFS)
+    config = Application.get_env(:ueberauth, Ueberauth.Strategy.ADFS) || []
 
     with {value, new_config} when not is_nil(value) <- Keyword.pop(config, :adfs_url) do
       adfs_url = URI.parse(value)
@@ -44,9 +44,7 @@ defmodule Ueberauth.Strategy.ADFS.OAuth do
   end
 
   def authorize_url!(opts \\ []) do
-    opts
-    |> client()
-    |> Client.authorize_url!()
+    Client.authorize_url!(client(), opts)
   end
 
   def get_token(code, opts \\ []) do
