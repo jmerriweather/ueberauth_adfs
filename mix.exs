@@ -54,6 +54,7 @@ defmodule UeberauthAdfs.MixProject do
       {:ex_doc, "~> 0.16", only: :dev, runtime: false},
       {:httpoison, "~> 0.13"},
       {:joken, "~> 1.5"},
+      {:mock, "~> 0.3.0", only: :test},
       {:oauth2, "~> 0.9"},
       {:sweet_xml, "~> 0.6"},
       {:ueberauth, "~> 0.5"}

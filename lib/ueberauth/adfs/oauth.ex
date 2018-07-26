@@ -54,7 +54,7 @@ defmodule Ueberauth.Strategy.ADFS.OAuth do
   end
 
   def signout_url(params \\ %{}) do
-    config = Application.get_env(:ueberauth, Ueberauth.Strategy.ADFS)
+    config = Application.get_env(:ueberauth, Ueberauth.Strategy.ADFS) || []
 
     with {value, _} when not is_nil(value) <- Keyword.pop(config, :adfs_url) do
       adfs_url = URI.parse(value)
