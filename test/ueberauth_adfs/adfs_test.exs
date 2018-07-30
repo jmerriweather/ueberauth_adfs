@@ -10,21 +10,29 @@ defmodule Ueberauth.Strategy.ADFSTest do
                    "<X509Data><X509Certificate>1234</X509Certificate></X509Data>" <>
                    "</KeyInfo></ds:Signature></EntityDescriptor>"
 
-  @user_claim %Joken.Token{claims: :claims_user}
+  @user_claim %Joken.Token{
+    claims: %{
+      "email" => "user@test.com",
+      "given_name" => "John",
+      "family_name" => "Doe",
+      "winaccountname" => "john1"
+    }
+  }
 
   describe "ADFS Strategy" do
     setup_with_mocks [
+      {ADFS.OAuth, [:passthrough], [get_token: &mock_token/2]},
+      {HTTPoison, [:passthrough], [get: &mock_metadata/3]},
+      {Joken, [:passthrough],
+       [token: fn token -> token end, with_signer: fn token, _ -> token end, verify: &mock_jwt/1]},
+      {JOSE.JWK, [:passthrough], [from_pem: fn _ -> %{foo: :bar} end]},
       {Ueberauth.Strategy.Helpers, [:passthrough],
        [
          callback_url: fn _ -> "https://test.com" end,
+         options: fn _ -> [uid_field: "email"] end,
          redirect!: fn _conn, auth_url -> auth_url end,
          set_errors!: fn _conn, errors -> errors end
-       ]},
-      {ADFS.OAuth, [:passthrough], [get_token: &mock_token/2]},
-      {HTTPoison, [:passthrough], [get: &mock_metadata/3]},
-      {JOSE.JWK, [:passthrough], [from_pem: fn _ -> %{foo: :bar} end]},
-      {Joken, [:passthrough],
-       [token: fn token -> token end, with_signer: fn token, _ -> token end, verify: &mock_jwt/1]}
+       ]}
     ] do
       set_env(:default)
 
@@ -62,7 +70,7 @@ defmodule Ueberauth.Strategy.ADFSTest do
 
     test "Handle callback from ADFS provider, set claims user from JWT" do
       conn = ADFS.handle_callback!(%Plug.Conn{params: %{"code" => "1234"}})
-      assert conn.private.adfs_user == :claims_user
+      assert conn.private.adfs_user == @user_claim.claims
     end
 
     test "Handle callback from ADFS provider when JWT is unauthorized" do
@@ -133,6 +141,72 @@ defmodule Ueberauth.Strategy.ADFSTest do
                message: "No code received",
                message_key: "missing_code"
              }
+    end
+
+    test "Handles cleanup of the private vars in the conn" do
+      conn =
+        %Plug.Conn{params: %{"code" => "1234"}}
+        |> ADFS.handle_callback!()
+        |> ADFS.handle_cleanup!()
+
+      assert conn.private.adfs_user == nil
+      assert conn.private.adfs_token == nil
+    end
+
+    test "Gets the uid field from the conn" do
+      email =
+        %Plug.Conn{params: %{"code" => "1234"}}
+        |> ADFS.handle_callback!()
+        |> ADFS.uid()
+
+      assert email == "user@test.com"
+    end
+
+    test "Gets the token credentials from the conn" do
+      token =
+        %Plug.Conn{params: %{"code" => "1234"}}
+        |> ADFS.handle_callback!()
+        |> ADFS.credentials()
+
+      assert token == %Ueberauth.Auth.Credentials{}
+    end
+
+    test "Gets the user info from the conn" do
+      info =
+        %Plug.Conn{params: %{"code" => "1234"}}
+        |> ADFS.handle_callback!()
+        |> ADFS.info()
+
+      assert info == %Ueberauth.Auth.Info{
+               name: "John Doe",
+               nickname: "john1",
+               email: "user@test.com"
+             }
+    end
+
+    test "Gets the extra info from the conn" do
+      extra =
+        %Plug.Conn{params: %{"code" => "1234"}}
+        |> ADFS.handle_callback!()
+        |> ADFS.extra()
+
+      assert %Ueberauth.Auth.Extra{raw_info: %{token: %Joken.Token{}, user: %{}}} = extra
+    end
+
+    test "Returns the configured status when env is present" do
+      assert ADFS.configured?() == true
+    end
+
+    test "Returns the configured status when env is not present" do
+      Application.delete_env(:ueberauth, Ueberauth.Strategy.ADFS)
+
+      assert ADFS.configured?() == false
+    end
+
+    test "Returns the configured status when env is missing values" do
+      set_env(adfs_url: "https://test.com")
+
+      assert ADFS.configured?() == false
     end
   end
 
