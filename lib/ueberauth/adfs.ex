@@ -123,9 +123,9 @@ defmodule Ueberauth.Strategy.ADFS do
         _ -> set_errors!(conn, [error("token", "unauthorized")])
       end
     else
-      {:error, :metadata_not_found} -> set_errors!(conn, [error("metadata", "not_found")])
+      {:error, %HTTPoison.Error{}} -> set_errors!(conn, [error("metadata_url", "not_found")])
       {:error, :cert_not_found} -> set_errors!(conn, [error("certificate", "not_found")])
-      _ -> set_errors!(conn, [error("metadata", "unkown")])
+      false -> set_errors!(conn, [error("metadata", "malformed")])
     end
   end
 
@@ -135,9 +135,8 @@ defmodule Ueberauth.Strategy.ADFS do
     |> build_cert()
   end
 
-  defp cert_from_metadata(_), do: {:error, :metadata_not_found}
-
-  defp build_cert(cert_content) when is_binary(cert_content) do
+  defp build_cert(cert_content)
+       when is_binary(cert_content) and byte_size(cert_content) > 0 do
     {:ok,
      """
      -----BEGIN CERTIFICATE-----

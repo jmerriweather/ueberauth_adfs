@@ -7,8 +7,10 @@ defmodule Ueberauth.Strategy.ADFSTest do
   alias Ueberauth.Strategy.ADFS
 
   @mock_metadata "<EntityDescriptor><ds:Signature><KeyInfo>" <>
-                   "<X509Data><X509Certificate>MAgCAgTSAgIWLg==</X509Certificate></X509Data>" <>
+                   "<X509Data><X509Certificate>1234</X509Certificate></X509Data>" <>
                    "</KeyInfo></ds:Signature></EntityDescriptor>"
+
+  @user_claim %Joken.Token{claims: :claims_user}
 
   describe "ADFS Strategy" do
     setup_with_mocks [
@@ -18,11 +20,14 @@ defmodule Ueberauth.Strategy.ADFSTest do
          redirect!: fn _conn, auth_url -> auth_url end,
          set_errors!: fn _conn, errors -> errors end
        ]},
-      {OAuth2.Client, [:passthrough],
-       [get_token: fn client, code -> {:ok, %{token: %{access_token: "1234"}}} end]},
+      {ADFS.OAuth, [:passthrough], [get_token: &mock_token/2]},
       {HTTPoison, [:passthrough], [get: &mock_metadata/3]},
-      {JOSE.JWK, [:passthrough], [from_pem: fn _ -> %{foo: :bar} end]}
+      {JOSE.JWK, [:passthrough], [from_pem: fn _ -> %{foo: :bar} end]},
+      {Joken, [:passthrough],
+       [token: fn token -> token end, with_signer: fn token, _ -> token end, verify: &mock_jwt/1]}
     ] do
+      set_env(:default)
+
       :ok
     end
 
@@ -34,12 +39,9 @@ defmodule Ueberauth.Strategy.ADFSTest do
     end
 
     test "Redirects ADFS request to index when missing config" do
-      env = Application.get_env(:ueberauth, Ueberauth.Strategy.ADFS)
       Application.delete_env(:ueberauth, Ueberauth.Strategy.ADFS)
 
       assert ADFS.handle_request!(nil) == "/"
-
-      Application.put_env(:ueberauth, Ueberauth.Strategy.ADFS, env)
     end
 
     test "Handles the logout request" do
@@ -48,7 +50,6 @@ defmodule Ueberauth.Strategy.ADFSTest do
     end
 
     test "Gives an error upon logout request with missing config" do
-      env = Application.get_env(:ueberauth, Ueberauth.Strategy.ADFS)
       Application.delete_env(:ueberauth, Ueberauth.Strategy.ADFS)
 
       assert ADFS.logout(nil, nil) == [
@@ -57,16 +58,91 @@ defmodule Ueberauth.Strategy.ADFSTest do
                  message_key: "Logout Failed"
                }
              ]
-
-      Application.put_env(:ueberauth, Ueberauth.Strategy.ADFS, env)
     end
 
-    test "Handle callback from ADFS provider" do
-      IO.inspect(ADFS.handle_callback!(%Plug.Conn{params: %{"code" => "1234"}}))
+    test "Handle callback from ADFS provider, set claims user from JWT" do
+      conn = ADFS.handle_callback!(%Plug.Conn{params: %{"code" => "1234"}})
+      assert conn.private.adfs_user == :claims_user
+    end
+
+    test "Handle callback from ADFS provider when JWT is unauthorized" do
+      [error] = ADFS.handle_callback!(%Plug.Conn{params: %{"code" => "unauthorized"}})
+
+      assert error ==
+               %Ueberauth.Failure.Error{
+                 message: "unauthorized",
+                 message_key: "token"
+               }
+    end
+
+    test "Handle callback from ADFS provider when metadata is malformed" do
+      set_env(adfs_metadata_url: "metadata_malformed")
+
+      [error] = ADFS.handle_callback!(%Plug.Conn{params: %{"code" => "1234"}})
+      assert error == %Ueberauth.Failure.Error{message: "malformed", message_key: "metadata"}
+    end
+
+    test "Handle callback from ADFS provider when certificate is not found in metadata" do
+      set_env(adfs_metadata_url: "cert_not_found")
+
+      [error] = ADFS.handle_callback!(%Plug.Conn{params: %{"code" => "1234"}})
+      assert error == %Ueberauth.Failure.Error{message: "not_found", message_key: "certificate"}
+    end
+
+    test "Handle callback from ADFS provider when metadata url is not found" do
+      set_env(adfs_metadata_url: "url_not_found")
+
+      [error] = ADFS.handle_callback!(%Plug.Conn{params: %{"code" => "1234"}})
+      assert error == %Ueberauth.Failure.Error{message: "not_found", message_key: "metadata_url"}
+    end
+
+    test "Handle callback from ADFS provider with token error" do
+      [error] = ADFS.handle_callback!(%Plug.Conn{params: %{"code" => "token_error"}})
+
+      assert error == %Ueberauth.Failure.Error{
+               message: "token_error",
+               message_key: "Authentication Error"
+             }
+    end
+
+    test "Handle callback from ADFS provider with OAuth2 error" do
+      [error] = ADFS.handle_callback!(%Plug.Conn{params: %{"code" => "oauth_error"}})
+
+      assert error == %Ueberauth.Failure.Error{
+               message: "oauth_error",
+               message_key: "Authentication Error"
+             }
+    end
+
+    test "Handle callback from ADFS provider with error in the params" do
+      [error] =
+        ADFS.handle_callback!(%Plug.Conn{
+          params: %{"error" => "param_error", "error_description" => "param_error_description"}
+        })
+
+      assert error == %Ueberauth.Failure.Error{
+               message: "param_error_description",
+               message_key: "param_error"
+             }
+    end
+
+    test "Handle callback from ADFS provider with missing code" do
+      [error] = ADFS.handle_callback!(%Plug.Conn{})
+
+      assert error == %Ueberauth.Failure.Error{
+               message: "No code received",
+               message_key: "missing_code"
+             }
     end
   end
 
   describe "ADFS Oauth Client" do
+    setup do
+      set_env(:default)
+
+      :ok
+    end
+
     test "Gets the client with the config properties" do
       env = Application.get_env(:ueberauth, Ueberauth.Strategy.ADFS)
       client = ADFS.OAuth.client()
@@ -77,18 +153,13 @@ defmodule Ueberauth.Strategy.ADFSTest do
     end
 
     test "Gets the client with options" do
-      env = Application.get_env(:ueberauth, Ueberauth.Strategy.ADFS)
       client = ADFS.OAuth.client(client_id: "other_client")
       assert client.client_id == "other_client"
     end
 
     test "Doesn't get the client without config" do
-      env = Application.get_env(:ueberauth, Ueberauth.Strategy.ADFS)
       Application.delete_env(:ueberauth, Ueberauth.Strategy.ADFS)
-
       client = ADFS.OAuth.client()
-
-      Application.put_env(:ueberauth, Ueberauth.Strategy.ADFS, env)
 
       assert client == {nil, []}
     end
@@ -114,16 +185,59 @@ defmodule Ueberauth.Strategy.ADFSTest do
     end
 
     test "Fails to get the signout url without config" do
-      env = Application.get_env(:ueberauth, Ueberauth.Strategy.ADFS)
       Application.delete_env(:ueberauth, Ueberauth.Strategy.ADFS)
 
       assert ADFS.OAuth.signout_url() == {:error, :failed_to_logout}
-
-      Application.put_env(:ueberauth, Ueberauth.Strategy.ADFS, env)
     end
   end
 
-  defp mock_metadata(_url, _, _) do
+  defp mock_token("token_error", _) do
+    {:error, %{reason: "token_error"}}
+  end
+
+  defp mock_token("oauth_error", _) do
+    {:error, %OAuth2.Response{body: %{"error_description" => "oauth_error"}}}
+  end
+
+  defp mock_token(code, _) do
+    {:ok, %{token: %{access_token: code}}}
+  end
+
+  defp mock_metadata("metadata_malformed", _, _) do
+    {:ok, %HTTPoison.Response{body: ""}}
+  end
+
+  defp mock_metadata("cert_not_found", _, _) do
+    {:ok, %HTTPoison.Response{body: "<EntityDescriptor></EntityDescriptor>"}}
+  end
+
+  defp mock_metadata("url_not_found", _, _) do
+    {:error, %HTTPoison.Error{}}
+  end
+
+  defp mock_metadata(_, _, _) do
     {:ok, %HTTPoison.Response{body: @mock_metadata}}
+  end
+
+  defp mock_jwt("1234"), do: @user_claim
+  defp mock_jwt("unauthorized"), do: nil
+
+  defp set_env(:default) do
+    Application.put_env(
+      :ueberauth,
+      Ueberauth.Strategy.ADFS,
+      adfs_url: "https://example.com",
+      adfs_metadata_url: "https://example.com/metadata.xml",
+      client_id: "example_client",
+      resource_identifier: "example_resource"
+    )
+  end
+
+  defp set_env(value) do
+    Application.put_env(
+      :ueberauth,
+      Ueberauth.Strategy.ADFS,
+      value
+    )
   end
 end
