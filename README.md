@@ -36,7 +36,9 @@ Docs can be found at [https://hexdocs.pm/ueberauth_adfs](https://hexdocs.pm/uebe
   ```elixir
   config :ueberauth, Ueberauth.Strategy.ADFS.OAuth,
     adfs_url: System.get_env("ADFS_URL"),
-    client_id: System.get_env("ADFS_CLIENT_ID")
+    adfs_metadata_url: System.get_env("ADFS_METADATA_URL"),
+    client_id: System.get_env("ADFS_CLIENT_ID"),
+    resource_identifier: System.get_env("RESOURCE_IDENTIFIER")
   ```
 
 #### Add ADFS provider to Ueberauth:
@@ -45,8 +47,9 @@ Docs can be found at [https://hexdocs.pm/ueberauth_adfs](https://hexdocs.pm/uebe
   providers: [
     adfs: { Ueberauth.Strategy.ADFS,
       [
-        adfs_metadata_url: "https://path.to/FederationMetadata.xml",
-        resource_identifier: "http://localhost:4000/auth/adfs"
+        #uid_field: :email,
+        #request_path: "/sessions/adfs",
+        #callback_path: "/sessions/adfs/callback"
       ]
     }
   ]
