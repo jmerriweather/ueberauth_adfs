@@ -48,8 +48,8 @@ Docs can be found at [https://hexdocs.pm/ueberauth_adfs](https://hexdocs.pm/uebe
     adfs: { Ueberauth.Strategy.ADFS,
       [
         #uid_field: :email,
-        #request_path: "/sessions/adfs",
-        #callback_path: "/sessions/adfs/callback"
+        #request_path: "/auth/adfs",
+        #callback_path: "/auth/adfs/callback"
       ]
     }
   ]
