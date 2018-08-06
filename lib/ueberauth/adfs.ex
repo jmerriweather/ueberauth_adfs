@@ -7,7 +7,6 @@ defmodule Ueberauth.Strategy.ADFS do
 
   use Ueberauth.Strategy
 
-  alias Ueberauth.Auth.{Info, Credentials, Extra}
   alias Ueberauth.Strategy.ADFS.OAuth
 
   def handle_request!(conn) do
@@ -55,6 +54,7 @@ defmodule Ueberauth.Strategy.ADFS do
     conn
     |> put_private(:adfs_user, nil)
     |> put_private(:adfs_token, nil)
+    |> put_private(:adfs_handler, nil)
   end
 
   def uid(conn) do
@@ -67,28 +67,15 @@ defmodule Ueberauth.Strategy.ADFS do
   end
 
   def credentials(conn) do
-    token = conn.private.adfs_token
-
-    %Credentials{token: token.token}
+    apply(conn.private.adfs_handler, :credentials, [conn])
   end
 
   def info(conn) do
-    user = conn.private.adfs_user
-
-    %Info{
-      name: "#{user["given_name"]} #{user["family_name"]}",
-      nickname: user["winaccountname"],
-      email: user["email"]
-    }
+    apply(conn.private.adfs_handler, :info, [conn])
   end
 
   def extra(conn) do
-    %Extra{
-      raw_info: %{
-        token: conn.private[:adfs_token],
-        user: conn.private[:adfs_user]
-      }
-    }
+    apply(conn.private.adfs_handler, :extra, [conn])
   end
 
   def configured? do
@@ -99,6 +86,10 @@ defmodule Ueberauth.Strategy.ADFS do
 
   defp fetch_user(conn, %{token: %{access_token: access_token}}) do
     url = config(:adfs_metadata_url)
+
+    adfs_handler = config(:adfs_handler) || Ueberauth.Strategy.ADFS.DefaultHandler
+
+    conn = put_private(conn, :adfs_handler, adfs_handler)
 
     with {:ok, %HTTPoison.Response{body: metadata}} <-
            HTTPoison.get(url, [], ssl: [versions: [:"tlsv1.2"]]),

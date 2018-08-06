@@ -1,9 +1,9 @@
 defmodule UeberauthAdfs.MixProject do
   use Mix.Project
 
-  @version "0.1.0"
-  @url "https://github.com/Kuret/ueberauth_adfs"
-  @maintainers ["Rick Littel"]
+  @version "0.2.0"
+  @url "https://github.com/jmerriweather/ueberauth_adfs"
+  @maintainers ["Jonathan Merriweather", "Rick Littel"]
 
   def project do
     [
