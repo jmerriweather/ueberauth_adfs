@@ -158,13 +158,17 @@ defmodule Ueberauth.Strategy.ADFS do
     redirect!(conn, authorize_url)
   end
 
-  defp env_present?(
-         [adfs_url: _, adfs_metadata_url: _, client_id: _, resource_identifier: _] = env
-       ) do
-    env
-    |> Keyword.values()
-    |> Enum.all?(&(byte_size(&1 || <<>>) > 0))
+  defp env_present?(env) do
+    if Keyword.has_key?(env, :adfs_url)
+    && Keyword.has_key?(env, :adfs_metadata_url)
+    && Keyword.has_key?(env, :client_id)
+    && Keyword.has_key?(env, :resource_identifier) do
+      env
+      |> Keyword.take([:adfs_url, :adfs_metadata_url, :client_id, :resource_identifier])
+      |> Keyword.values()
+      |> Enum.all?(&(byte_size(&1 || <<>>) > 0))
+    else
+      false
+    end
   end
-
-  defp env_present?(_), do: false
 end
