@@ -37,7 +37,7 @@ Docs can be found at [https://hexdocs.pm/ueberauth_adfs](https://hexdocs.pm/uebe
   config :ueberauth, Ueberauth.Strategy.ADFS.OAuth,
     adfs_url: System.get_env("ADFS_URL"),
     adfs_metadata_url: System.get_env("ADFS_METADATA_URL"),
-    adfs_handler: Ueberauth.Strategy.ADFS.DefaultHandler, # Optional, ability to provide handler to extra information from the token claims
+    adfs_handler: Ueberauth.Strategy.ADFS.DefaultHandler, # Optional, ability to provide handler to extract information from the token claims
     client_id: System.get_env("ADFS_CLIENT_ID"),
     resource_identifier: System.get_env("RESOURCE_IDENTIFIER")
   ```
