@@ -37,7 +37,7 @@ Docs can be found at [https://hexdocs.pm/ueberauth_adfs](https://hexdocs.pm/uebe
   config :ueberauth, Ueberauth.Strategy.ADFS.OAuth,
     adfs_url: System.get_env("ADFS_URL"),
     adfs_metadata_url: System.get_env("ADFS_METADATA_URL"),
-    adfs_handler: Ueberauth.Strategy.ADFS.DefaultHandler, # Optional, ability to provide handler to extract information from the token claims
+    adfs_handler: MyApp.ADFSHandler, # Optional, ability to provide handler to extract information from the token claims
     client_id: System.get_env("ADFS_CLIENT_ID"),
     resource_identifier: System.get_env("RESOURCE_IDENTIFIER")
   ```
@@ -55,3 +55,46 @@ Docs can be found at [https://hexdocs.pm/ueberauth_adfs](https://hexdocs.pm/uebe
     }
   ]
   ```
+
+#### Optional: Create custom ADFS handler
+  ```elixir
+  defmodule MyApp.ADFSHandler do
+    use Ueberauth.Strategy.ADFS.Handler
+
+    def credentials(conn) do
+      token = conn.private.adfs_token
+
+      %Credentials{
+        expires: token.claims["exp"] != nil,
+        expires_at: token.claims["exp"],
+        scopes: token.claims["aud"],
+        token: token.token
+      }
+    end
+
+    @doc false
+    def info(conn) do
+      user = conn.private.adfs_user
+
+      %Info{
+        nickname: user["winaccountname"],
+        name: "#{user["given_name"]} #{user["family_name"]}",
+        email: user["email"],
+        first_name: user["given_name"],
+        last_name: user["family_name"]
+      }
+    end
+
+    @doc false
+    def extra(conn) do
+      user = conn.private.adfs_user
+
+      %Extra{
+        raw_info: %{
+          token: conn.private[:adfs_token],
+          user: user,
+          groups: user["groups"]
+        }
+      }
+    end
+  end

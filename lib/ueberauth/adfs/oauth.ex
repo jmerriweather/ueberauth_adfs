@@ -1,18 +1,6 @@
 defmodule Ueberauth.Strategy.ADFS.OAuth do
   @moduledoc """
-  OAuth2 for ADFS
-  Add 'adfs_url', 'adfs_metadata_url', 'client_id' and 'resource_identifier'
-  to your configuration:
-  config :ueberauth, Ueberauth.Strategy.ADFS,
-    adfs_url: "https://adfs.url",
-    adfs_metadata_url: "https://path.to/FederationMetadata.xml",
-    client_id: "the_client",
-    resource_identifier: "the_resource_id"
-
-  On the ADFS server add a new Client:
-  Add-AdfsClient -Name "the_client_name" -ClientId "the_client" -RedirectUri "https://my_application.url/auth/adfs/callback"
-
-  Setup the relying party trust as usual, be sure to return at least the e-mail in the clams.
+   ## OAuth2 for ADFS
   """
 
   use OAuth2.Strategy

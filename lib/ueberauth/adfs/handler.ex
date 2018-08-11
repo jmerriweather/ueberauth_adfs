@@ -1,5 +1,14 @@
 defmodule Ueberauth.Strategy.ADFS.Handler do
   alias Ueberauth.Auth.{Info, Credentials, Extra}
+  @moduledoc """
+  ADFS Handler behaviour.
+
+  ```elixir
+  defmodule MyApp.ADFSHandler do
+    use Ueberauth.Strategy.ADFS.Handler
+  end
+  ```
+  """
 
   @doc """
   Provides a place within the Ueberauth.Auth struct for information about the user.

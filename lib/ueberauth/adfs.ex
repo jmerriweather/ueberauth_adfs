@@ -1,6 +1,76 @@
 defmodule Ueberauth.Strategy.ADFS do
   @moduledoc """
   ADFS Strategy for Überauth.
+
+   In ADFS Server setup a new Client using Powershell:
+  ```powershell
+  Add-AdfsClient -Name "OAUTH2 Client" -ClientId "unique-custom-client-id" -RedirectUri "http://localhost:4000/auth/adfs/callback"
+  Add-ADFSRelyingPartyTrust -Name "OAUTH2 Client" -Identifier "http://localhost:4000/auth/adfs"
+  Set-AdfsRelyingPartyTrust -IssuanceAuthorizationRulesFile "TransformRules.txt"
+  ```
+
+  In TransformRules.txt put the following:
+  ```
+  @RuleTemplate = "LdapClaims"
+  @RuleName = "User Details"
+  c:[Type == "http://schemas.microsoft.com/ws/2008/06/identity/claims/windowsaccountname", Issuer == "AD AUTHORITY"]
+  => issue(store = "Active Directory", types = ("http://schemas.microsoft.com/ws/2008/06/identity/claims/windowsaccountname", "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname", "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname", "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress", "groups", "userPrincipalName"), query = ";sAMAccountName,givenName,sn,mail,tokenGroups,userPrincipalName;{0}", param = c.Value);
+  ```
+
+  Add 'adfs_url', 'adfs_metadata_url', 'client_id', 'resource_identifier' and optionally adfs_handler
+  to your configuration:
+  ```elixir
+  config :ueberauth, Ueberauth.Strategy.ADFS,
+    adfs_url: "https://adfs.url",
+    adfs_metadata_url: "https://path.to/FederationMetadata.xml",
+    adfs_handler: MyApp.ADFSHandler, # Use custom handler to extract information from the token claims
+    client_id: "the_client",
+    resource_identifier: "the_resource_id"
+  ```
+
+  An example custom ADFS handler
+  ```elixir
+  defmodule MyApp.ADFSHandler do
+    use Ueberauth.Strategy.ADFS.Handler
+
+    def credentials(conn) do
+      token = conn.private.adfs_token
+
+      %Credentials{
+        expires: token.claims["exp"] != nil,
+        expires_at: token.claims["exp"],
+        scopes: token.claims["aud"],
+        token: token.token
+      }
+    end
+
+    @doc false
+    def info(conn) do
+      user = conn.private.adfs_user
+
+      %Info{
+        nickname: user["winaccountname"],
+        name: "\#{user["given_name"]} \#{user["family_name"]}",
+        email: user["email"],
+        first_name: user["given_name"],
+        last_name: user["family_name"]
+      }
+    end
+
+    @doc false
+    def extra(conn) do
+      user = conn.private.adfs_user
+
+      %Extra{
+        raw_info: %{
+          token: conn.private[:adfs_token],
+          user: user,
+          groups: user["groups"]
+        }
+      }
+    end
+  end
+  ```
   """
 
   import SweetXml
