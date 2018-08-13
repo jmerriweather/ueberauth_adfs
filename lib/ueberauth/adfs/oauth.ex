@@ -1,28 +1,6 @@
 defmodule Ueberauth.Strategy.ADFS.OAuth do
   @moduledoc """
-
-  ## OAuth2 for ADFS
-
-  In ADFS >=3.0 setup a new Client using Powershell:
-  ```powershell
-  Add-AdfsClient -Name "OAUTH2 Client" -ClientId "unique-custom-client-id" -RedirectUri "http://localhost:4000/auth/adfs/callback"
-  Add-ADFSRelyingPartyTrust -Name "OAUTH2 Client" -Identifier "http://localhost:4000/auth/adfs"
-  Set-AdfsRelyingPartyTrust -IssuanceAuthorizationRulesFile "TransformRules.txt"
-  ```
-  In TransformRules.txt put the following:
-  ```
-  @RuleTemplate = "LdapClaims"
-  @RuleName = "User Details"
-  c:[Type == "http://schemas.microsoft.com/ws/2008/06/identity/claims/windowsaccountname", Issuer == "AD AUTHORITY"]
-  => issue(store = "Active Directory", types = ("http://schemas.microsoft.com/ws/2008/06/identity/claims/windowsaccountname", "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname", "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname", "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress", "groups", "userPrincipalName"), query = ";sAMAccountName,givenName,sn,mail,tokenGroups,userPrincipalName;{0}", param = c.Value);
-  ```
-
-  Add `adfs_url` and `client_id` to your configuration:
-  ```elixir
-  config :ueberauth, Ueberauth.Strategy.ADFS.OAuth,
-    adfs_url: System.get_env("ADFS_URL"),
-    client_id: System.get_env("ADFS_CLIENT_ID")
-  ```
+   ## OAuth2 for ADFS
   """
 
   use OAuth2.Strategy
@@ -32,11 +10,11 @@ defmodule Ueberauth.Strategy.ADFS.OAuth do
 
   @defaults [
     strategy: __MODULE__,
-    request_opts: [ssl_options: [versions: [:'tlsv1.2']]]
+    request_opts: [ssl_options: [versions: [:"tlsv1.2"]]]
   ]
 
   def client(opts \\ []) do
-    config = Application.get_env(:ueberauth, __MODULE__)
+    config = Application.get_env(:ueberauth, Ueberauth.Strategy.ADFS) || []
 
     with {value, new_config} when not is_nil(value) <- Keyword.pop(config, :adfs_url) do
       adfs_url = URI.parse(value)
@@ -45,57 +23,57 @@ defmodule Ueberauth.Strategy.ADFS.OAuth do
       token_url = URI.merge(adfs_url, "adfs/oauth2/token") |> URI.to_string()
 
       @defaults
-        |> Keyword.put(:authorize_url, authorize_url)
-        |> Keyword.put(:token_url, token_url)
-        |> Keyword.merge(new_config)
-        |> Keyword.merge(opts)
-        |> Client.new
+      |> Keyword.put(:authorize_url, authorize_url)
+      |> Keyword.put(:token_url, token_url)
+      |> Keyword.merge(new_config)
+      |> Keyword.merge(opts)
+      |> Client.new()
     end
   end
 
-  def authorize_url!(params \\ [], opts \\ []) do
+  def authorize_url!(opts \\ []) do
+    Client.authorize_url!(client(), opts)
+  end
+
+  def get_token(code, opts \\ []) do
     opts
-      |> client
-      |> Client.authorize_url!(params)
+    |> client()
+    |> Client.get_token(code: code)
   end
 
   def signout_url(params \\ %{}) do
-    config = Application.get_env(:ueberauth, __MODULE__)
+    config = Application.get_env(:ueberauth, Ueberauth.Strategy.ADFS) || []
 
     with {value, _} when not is_nil(value) <- Keyword.pop(config, :adfs_url) do
       adfs_url = URI.parse(value)
       signout_return_address = Map.get(params, :redirect_uri)
 
-      redirect = case signout_return_address do
-        nil -> "adfs/ls/?wa=wsignout1.0"
-        address -> "adfs/ls/?wa=wsignout1.0&wreply=#{address}"
-      end
+      redirect =
+        case signout_return_address do
+          nil -> "adfs/ls/?wa=wsignout1.0"
+          address -> "adfs/ls/?wa=wsignout1.0&wreply=#{address}"
+        end
 
       {
         :ok,
         adfs_url
-          |> URI.merge(redirect)
-          |> URI.to_string()
+        |> URI.merge(redirect)
+        |> URI.to_string()
       }
     else
       _ -> {:error, :failed_to_logout}
     end
   end
 
-  def send_token_request(params \\ [], opts \\ []) do
-    opts
-      |> client
-      |> Client.get_token(params)
-  end
-
-  # oauth2 Strategy Callbacks
+  # Strategy Callbacks
 
   def authorize_url(client, params) do
     AuthCode.authorize_url(client, params)
   end
 
   def get_token(client, params, headers) do
-    new_client = client
+    new_client =
+      client
       |> put_param(:grant_type, "authorization_code")
       |> put_header("Accept", "application/json")
 

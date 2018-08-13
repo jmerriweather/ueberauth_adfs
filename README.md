@@ -7,7 +7,7 @@ The package can be installed by adding `ueberauth_adfs` to your list of dependen
 ```elixir
 def deps do
   [
-    {:ueberauth_adfs, "~> 0.1.0"}
+    {:ueberauth_adfs, "~> 0.2.0"}
   ]
 end
 ```
@@ -36,7 +36,10 @@ Docs can be found at [https://hexdocs.pm/ueberauth_adfs](https://hexdocs.pm/uebe
   ```elixir
   config :ueberauth, Ueberauth.Strategy.ADFS.OAuth,
     adfs_url: System.get_env("ADFS_URL"),
-    client_id: System.get_env("ADFS_CLIENT_ID")
+    adfs_metadata_url: System.get_env("ADFS_METADATA_URL"),
+    adfs_handler: MyApp.ADFSHandler, # Optional, ability to provide handler to extract information from the token claims
+    client_id: System.get_env("ADFS_CLIENT_ID"),
+    resource_identifier: System.get_env("RESOURCE_IDENTIFIER")
   ```
 
 #### Add ADFS provider to Ueberauth:
@@ -45,9 +48,53 @@ Docs can be found at [https://hexdocs.pm/ueberauth_adfs](https://hexdocs.pm/uebe
   providers: [
     adfs: { Ueberauth.Strategy.ADFS,
       [
-        adfs_signing_certificate: "priv/token-signing-cert-public.pem",
-        resource_identifier: "http://localhost:4000/auth/adfs"
+        #uid_field: :email,
+        #request_path: "/auth/adfs",
+        #callback_path: "/auth/adfs/callback"
       ]
     }
   ]
   ```
+
+#### Optional: Create custom ADFS handler
+  ```elixir
+  defmodule MyApp.ADFSHandler do
+    use Ueberauth.Strategy.ADFS.Handler
+
+    def credentials(conn) do
+      token = conn.private.adfs_token
+
+      %Credentials{
+        expires: token.claims["exp"] != nil,
+        expires_at: token.claims["exp"],
+        scopes: token.claims["aud"],
+        token: token.token
+      }
+    end
+
+    @doc false
+    def info(conn) do
+      user = conn.private.adfs_user
+
+      %Info{
+        nickname: user["winaccountname"],
+        name: "#{user["given_name"]} #{user["family_name"]}",
+        email: user["email"],
+        first_name: user["given_name"],
+        last_name: user["family_name"]
+      }
+    end
+
+    @doc false
+    def extra(conn) do
+      user = conn.private.adfs_user
+
+      %Extra{
+        raw_info: %{
+          token: conn.private[:adfs_token],
+          user: user,
+          groups: user["groups"]
+        }
+      }
+    end
+  end
