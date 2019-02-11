@@ -1,7 +1,7 @@
 defmodule UeberauthAdfs.MixProject do
   use Mix.Project
 
-  @version "0.2.0"
+  @version "0.3.0"
   @url "https://github.com/jmerriweather/ueberauth_adfs"
   @maintainers ["Jonathan Merriweather", "Rick Littel"]
 
@@ -56,8 +56,8 @@ defmodule UeberauthAdfs.MixProject do
       {:joken, "~> 1.5"},
       {:mock, "~> 0.3.0", only: :test},
       {:oauth2, "~> 0.9"},
-      {:sweet_xml, "~> 0.6"},
-      {:ueberauth, "~> 0.5"}
+      {:ueberauth, "~> 0.5"},
+      {:poison, "~> 3.0", optional: true}
     ]
   end
 end

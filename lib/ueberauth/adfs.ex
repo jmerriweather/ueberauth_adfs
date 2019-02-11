@@ -22,7 +22,6 @@ defmodule Ueberauth.Strategy.ADFS do
   ```elixir
   config :ueberauth, Ueberauth.Strategy.ADFS,
     adfs_url: "https://adfs.url",
-    adfs_metadata_url: "https://path.to/FederationMetadata.xml",
     adfs_handler: MyApp.ADFSHandler, # Use custom handler to extract information from the token claims
     client_id: "the_client",
     resource_identifier: "the_resource_id"
@@ -64,6 +63,7 @@ defmodule Ueberauth.Strategy.ADFS do
       %Extra{
         raw_info: %{
           token: conn.private[:adfs_token],
+          id_token: conn.private[:adfs_id_token],
           user: user,
           groups: user["groups"]
         }
@@ -72,8 +72,7 @@ defmodule Ueberauth.Strategy.ADFS do
   end
   ```
   """
-
-  import SweetXml
+  require Logger
 
   use Ueberauth.Strategy
 
@@ -81,14 +80,21 @@ defmodule Ueberauth.Strategy.ADFS do
 
   def handle_request!(conn) do
     if __MODULE__.configured?() do
+      jason_lib = config(:json_library)
+
+      if jason_lib do
+        Application.put_env(:oauth2, :serializers, %{"application/json" => jason_lib})
+        JOSE.json_module(jason_lib)
+      end
+
       redirect_to_authorization(conn)
     else
       redirect!(conn, "/")
     end
   end
 
-  def logout(conn, token) do
-    params = %{redirect_uri: callback_url(conn), token: token}
+  def logout(conn, id_token) do
+    params = %{redirect_uri: callback_url(conn), id_token: id_token}
 
     with {:ok, signout_url} <- OAuth.signout_url(params) do
       redirect!(conn, signout_url)
@@ -124,6 +130,7 @@ defmodule Ueberauth.Strategy.ADFS do
     conn
     |> put_private(:adfs_user, nil)
     |> put_private(:adfs_token, nil)
+    |> put_private(:adfs_id_token, nil)
     |> put_private(:adfs_handler, nil)
   end
 
@@ -154,46 +161,128 @@ defmodule Ueberauth.Strategy.ADFS do
     |> env_present?
   end
 
-  defp fetch_user(conn, %{token: %{access_token: access_token}}) do
-    url = config(:adfs_metadata_url)
+  def jason_module() do
+    config(:json_library, Poison)
+  end
 
-    adfs_handler = config(:adfs_handler) || Ueberauth.Strategy.ADFS.DefaultHandler
+  def get_wellknown_url() do
+    config(:adfs_url)
+    |> URI.merge("/adfs/.well-known/openid-configuration")
+    |> URI.to_string()
+  end
+
+  defp check_and_set_json_module(data) do
+    Joken.with_json_module(data, jason_module())
+  end
+
+  def make_token(payload) when is_map(payload) do
+    %Joken.Token{claims: payload}
+    |> check_and_set_json_module
+  end
+
+  def make_token(encoded_token) when is_binary(encoded_token) do
+    %Joken.Token{token: encoded_token}
+    |> check_and_set_json_module
+  end
+
+  defp fetch_user(conn, %{token: %{access_token: access_token} = token}) do
+    # IO.puts("token: #{inspect token}")
+    adfs_handler = config(:adfs_handler, Ueberauth.Strategy.ADFS.DefaultHandler)
 
     conn = put_private(conn, :adfs_handler, adfs_handler)
 
-    with {:ok, %HTTPoison.Response{body: metadata}} <-
-           HTTPoison.get(url, [], ssl: [versions: [:"tlsv1.2"]]),
-         true <- String.starts_with?(metadata, "<EntityDescriptor"),
-         {:ok, certificate} <- cert_from_metadata(metadata) do
-      key =
-        certificate
-        |> JOSE.JWK.from_pem()
-        |> Joken.rs256()
-
-      jwt =
-        access_token
-        |> Joken.token()
-        |> Joken.with_signer(key)
-        |> Joken.verify()
-
-      conn = put_private(conn, :adfs_token, jwt)
-
-      with %Joken.Token{claims: claims_user} <- jwt do
-        put_private(conn, :adfs_user, claims_user)
+    conn =
+      with {:ok, other} <- Map.fetch(token, :other_params),
+           %{"id_token" => id_token} <- other,
+           {:ok, validated_token} <- make_token(id_token) |> validate_token() do
+        put_private(conn, :adfs_id_token, validated_token)
       else
-        _ -> set_errors!(conn, [error("token", "unauthorized")])
+        _ ->
+          conn
       end
+
+    conn =
+      with made_token <- make_token(access_token),
+           {:ok, validated_token} <- validate_token(made_token),
+           %Joken.Token{claims: claims_user, error: nil} <- validated_token do
+        conn
+        |> put_private(:adfs_token, validated_token)
+        |> put_private(:adfs_user, claims_user)
+      else
+        :token_not_verified ->
+          Logger.error("#{inspect(__MODULE__)} - Token Validation Failed")
+          set_errors!(conn, [error("token", "unauthorized")])
+
+        %{error: "Invalid signature"} ->
+          Logger.error("#{inspect(__MODULE__)} - Invalid Public Key")
+          set_errors!(conn, [error("token", "unauthorized")])
+
+        _ ->
+          set_errors!(conn, [error("token", "unauthorized")])
+      end
+
+    # IO.puts("CONN: #{inspect conn}")
+    conn
+  end
+
+  def validate_token(token = %Joken.Token{token: token_string}) do
+    table_name =
+      try do
+        :ets.new(:adfs_keys_lookup, [:set, :public, :named_table])
+      rescue
+        _ -> :adfs_keys_lookup
+      end
+
+    with {:ok, decoded_header} <-
+           String.split(token_string, ".") |> List.first() |> Base.decode64(),
+         {:ok, %{"x5t" => identifier}} <- jason_module().decode(decoded_header),
+         {:ok, key} <- lookup_key(table_name, identifier, :ets.lookup(table_name, identifier)),
+         {:ok, certificate} <- build_cert(key) do
+      rs256_key = JOSE.JWK.from_pem(certificate) |> Joken.rs256()
+      {:ok, Joken.with_signer(token, rs256_key) |> Joken.verify()}
     else
-      {:error, %HTTPoison.Error{}} -> set_errors!(conn, [error("metadata_url", "not_found")])
-      {:error, :cert_not_found} -> set_errors!(conn, [error("certificate", "not_found")])
-      false -> set_errors!(conn, [error("metadata", "malformed")])
+      _ -> :token_not_verified
     end
   end
 
-  defp cert_from_metadata(metadata) when is_binary(metadata) do
-    metadata
-    |> xpath(~x"//EntityDescriptor/ds:Signature/KeyInfo/X509Data/X509Certificate/text()"s)
-    |> build_cert()
+  def lookup_key(table, identifier, []) do
+    update_key_cache(table)
+
+    case :ets.lookup(table, identifier) do
+      [] -> :no_valid_key
+      [{^identifier, [certificate]}] -> {:ok, certificate}
+    end
+  end
+
+  def lookup_key(_table, identifier, [{lookup_key, [certificate]}]) do
+    if identifier === lookup_key do
+      {:ok, certificate}
+    else
+      :no_valid_key
+    end
+  end
+
+  def update_key_cache(table) do
+    get_wellknown_url()
+    |> keys_from_wellknown()
+    |> Enum.each(fn %{"x5t" => identifier, "x5c" => certificate} ->
+      :ets.insert(table, {identifier, certificate})
+    end)
+  end
+
+  def keys_from_wellknown(well_known_url) do
+    with {:ok, %HTTPoison.Response{body: wellknown}} <-
+           HTTPoison.get(well_known_url, [], ssl: [versions: [:"tlsv1.2"]]),
+         {:ok, %{"jwks_uri" => keys_url}} <- jason_module().decode(wellknown),
+         {:ok, %HTTPoison.Response{body: keys_body}} <-
+           HTTPoison.get(keys_url, [], ssl: [versions: [:"tlsv1.2"]]),
+         {:ok, %{"keys" => keys}} <- jason_module().decode(keys_body) do
+      keys
+    else
+      error ->
+        IO.puts("Error: #{inspect(error)}")
+        []
+    end
   end
 
   defp build_cert(cert_content)
@@ -212,10 +301,10 @@ defmodule Ueberauth.Strategy.ADFS do
     Keyword.get(options(conn), key, Keyword.get(default_options(), key))
   end
 
-  defp config(option) do
+  defp config(option, default \\ nil) do
     :ueberauth
     |> Application.get_env(__MODULE__)
-    |> Keyword.get(option)
+    |> Keyword.get(option, default)
   end
 
   defp redirect_to_authorization(conn) do
@@ -228,17 +317,17 @@ defmodule Ueberauth.Strategy.ADFS do
     redirect!(conn, authorize_url)
   end
 
-  defp env_present?(env) do
-    if Keyword.has_key?(env, :adfs_url)
-    && Keyword.has_key?(env, :adfs_metadata_url)
-    && Keyword.has_key?(env, :client_id)
-    && Keyword.has_key?(env, :resource_identifier) do
+  defp env_present?(env) when not is_nil(env) do
+    if Keyword.has_key?(env, :adfs_url) && Keyword.has_key?(env, :client_id) &&
+         Keyword.has_key?(env, :resource_identifier) do
       env
-      |> Keyword.take([:adfs_url, :adfs_metadata_url, :client_id, :resource_identifier])
+      |> Keyword.take([:adfs_url, :client_id, :resource_identifier])
       |> Keyword.values()
       |> Enum.all?(&(byte_size(&1 || <<>>) > 0))
     else
       false
     end
   end
+
+  defp env_present?(_), do: false
 end

@@ -7,7 +7,7 @@ The package can be installed by adding `ueberauth_adfs` to your list of dependen
 ```elixir
 def deps do
   [
-    {:ueberauth_adfs, "~> 0.2.0"}
+    {:ueberauth_adfs, "~> 0.3.0"}
   ]
 end
 ```
@@ -36,7 +36,6 @@ Docs can be found at [https://hexdocs.pm/ueberauth_adfs](https://hexdocs.pm/uebe
   ```elixir
   config :ueberauth, Ueberauth.Strategy.ADFS.OAuth,
     adfs_url: System.get_env("ADFS_URL"),
-    adfs_metadata_url: System.get_env("ADFS_METADATA_URL"),
     adfs_handler: MyApp.ADFSHandler, # Optional, ability to provide handler to extract information from the token claims
     client_id: System.get_env("ADFS_CLIENT_ID"),
     resource_identifier: System.get_env("RESOURCE_IDENTIFIER")
@@ -92,6 +91,7 @@ Docs can be found at [https://hexdocs.pm/ueberauth_adfs](https://hexdocs.pm/uebe
       %Extra{
         raw_info: %{
           token: conn.private[:adfs_token],
+          id_token: conn.private[:adfs_id_token],
           user: user,
           groups: user["groups"]
         }

@@ -10,24 +10,15 @@ defmodule Ueberauth.Strategy.ADFSTest do
   alias Ueberauth.Strategy.ADFS
 
   @env_values adfs_url: "https://example.com",
-              adfs_metadata_url: "https://example.com/metadata.xml",
               client_id: "example_client",
               resource_identifier: "example_resource"
 
-
   @env_handler_values adfs_url: "https://example.com",
-                      adfs_metadata_url: "https://example.com/metadata.xml",
                       adfs_handler: Ueberauth.Strategy.ADFSTestHandler,
                       client_id: "example_client",
                       resource_identifier: "example_resource"
 
-  @mock_metadata {:ok,
-                  %HTTPoison.Response{
-                    body:
-                      "<EntityDescriptor><ds:Signature><KeyInfo>" <>
-                        "<X509Data><X509Certificate>1234</X509Certificate></X509Data>" <>
-                        "</KeyInfo></ds:Signature></EntityDescriptor>"
-                  }}
+  @mock_keys_json "{\"keys\": [{\"x5c\": [\"123456\"], \"x5t\": \"ffcIwS8n0GfyH8VwC78I315Uoas\"}]}"
 
   @user_claim %Joken.Token{
     claims: %{
@@ -35,7 +26,9 @@ defmodule Ueberauth.Strategy.ADFSTest do
       "given_name" => "John",
       "family_name" => "Doe",
       "winaccountname" => "john1"
-    }
+    },
+    token:
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsIng1dCI6ImZmY0l3UzhuMEdmeUg4VndDNzhJMzE1VW9hcyJ9.eyJlbWFpbCI6InVzZXJAdGVzdC5jb20iLCJnaXZlbl9uYW1lIjoiSm9obiIsImZhbWlseV9uYW1lIjoiRG9lIiwid2luYWNjb3VudG5hbWUiOiJqb2huMSJ9.rtexZuj6N59dMdKhp2JlIJ90cEUnsZxi7NqqNbK3x-Q"
   }
 
   describe "ADFS Strategy" do
@@ -43,9 +36,26 @@ defmodule Ueberauth.Strategy.ADFSTest do
       {ADFS.OAuth, [:passthrough],
        [get_token: fn code, _ -> {:ok, %{token: %{access_token: code}}} end]},
       {Application, [:passthrough], [get_env: fn _, _ -> @env_values end]},
-      {HTTPoison, [:passthrough], [get: fn _, _, _ -> @mock_metadata end]},
+      {HTTPoison, [:passthrough],
+       [
+         get: fn
+           "https://example.com/adfs/.well-known/openid-configuration", _, _ ->
+             {:ok,
+              %HTTPoison.Response{
+                body: "{\"jwks_uri\": \"https://example.com/adfs/discovery/keys\"}"
+              }}
+
+           "https://example.com/adfs/discovery/keys", _, _ ->
+             {:ok, %HTTPoison.Response{body: @mock_keys_json}}
+         end
+       ]},
       {Joken, [:passthrough],
-       [token: fn _ -> nil end, with_signer: fn _, _ -> nil end, verify: fn _ -> @user_claim end]},
+       [
+         token: fn _ -> nil end,
+         with_signer: fn _, _ -> nil end,
+         verify: fn _ -> @user_claim end,
+         with_json_module: fn _, _ -> @user_claim end
+       ]},
       {JOSE.JWK, [:passthrough], [from_pem: fn _ -> %{foo: :bar} end]},
       {Ueberauth.Strategy.Helpers, [:passthrough],
        [
@@ -53,6 +63,10 @@ defmodule Ueberauth.Strategy.ADFSTest do
          options: fn _ -> [uid_field: "email"] end,
          redirect!: fn _conn, auth_url -> auth_url end,
          set_errors!: fn _conn, errors -> errors end
+       ]},
+      {ADFS, [:passthrough],
+       [
+         make_token: fn _ -> @user_claim end
        ]}
     ] do
       :ok
@@ -71,7 +85,7 @@ defmodule Ueberauth.Strategy.ADFSTest do
     end
 
     test "Handles the logout request" do
-      assert ADFS.logout(nil, nil) =~ "#{@env_values[:adfs_url]}/adfs/ls/?wa=wsignout1.0"
+      assert ADFS.logout(nil, nil) =~ "#{@env_values[:adfs_url]}/adfs/oauth2/logout"
     end
 
     test "Gives an error upon logout request with missing config" do
@@ -103,38 +117,6 @@ defmodule Ueberauth.Strategy.ADFSTest do
                    message: "unauthorized",
                    message_key: "token"
                  }
-      end
-    end
-
-    test "Handle callback from ADFS provider when metadata is malformed" do
-      with_mock HTTPoison,
-                [:passthrough],
-                get: fn _, _, _ -> {:ok, %HTTPoison.Response{body: ""}} end do
-        [error] = ADFS.handle_callback!(%Plug.Conn{params: %{"code" => "1234"}})
-        assert error == %Ueberauth.Failure.Error{message: "malformed", message_key: "metadata"}
-      end
-    end
-
-    test "Handle callback from ADFS provider when certificate is not found in metadata" do
-      with_mock HTTPoison, [:passthrough],
-        get: fn _, _, _ ->
-          {:ok, %HTTPoison.Response{body: "<EntityDescriptor></EntityDescriptor>"}}
-        end do
-        [error] = ADFS.handle_callback!(%Plug.Conn{params: %{"code" => "1234"}})
-        assert error == %Ueberauth.Failure.Error{message: "not_found", message_key: "certificate"}
-      end
-    end
-
-    test "Handle callback from ADFS provider when metadata url is not found" do
-      with_mock HTTPoison,
-                [:passthrough],
-                get: fn _, _, _ -> {:error, %HTTPoison.Error{}} end do
-        [error] = ADFS.handle_callback!(%Plug.Conn{params: %{"code" => "1234"}})
-
-        assert error == %Ueberauth.Failure.Error{
-                 message: "not_found",
-                 message_key: "metadata_url"
-               }
       end
     end
 
@@ -212,7 +194,7 @@ defmodule Ueberauth.Strategy.ADFSTest do
         |> ADFS.handle_callback!()
         |> ADFS.credentials()
 
-      assert token == %Ueberauth.Auth.Credentials{}
+      assert token == %Ueberauth.Auth.Credentials{token: @user_claim.token}
     end
 
     test "Gets the user info from the conn" do
@@ -238,48 +220,49 @@ defmodule Ueberauth.Strategy.ADFSTest do
     end
 
     test "Gets the credential info from the conn with a custom handler" do
-      with_mock Application, [:passthrough], [get_env: fn _, _ -> @env_handler_values end] do
+      with_mock Application, [:passthrough], get_env: fn _, _ -> @env_handler_values end do
         credentials =
           %Plug.Conn{params: %{"code" => "1234"}}
           |> ADFS.handle_callback!()
           |> ADFS.credentials()
 
         assert credentials == %Ueberauth.Auth.Credentials{
-                other: %{handler: true}
-              }
+                 other: %{handler: true},
+                 token: @user_claim.token
+               }
       end
     end
 
     test "Gets the user info from the conn with a custom handler" do
-      with_mock Application, [:passthrough], [get_env: fn _, _ -> @env_handler_values end] do
+      with_mock Application, [:passthrough], get_env: fn _, _ -> @env_handler_values end do
         info =
           %Plug.Conn{params: %{"code" => "1234"}}
           |> ADFS.handle_callback!()
           |> ADFS.info()
 
         assert info == %Ueberauth.Auth.Info{
-                name: "John Doe",
-                nickname: "john1",
-                email: "user@test.com",
-                location: "handler"
-              }
+                 name: "John Doe",
+                 nickname: "john1",
+                 email: "user@test.com",
+                 location: "handler"
+               }
       end
     end
 
     test "Gets the extra info from the conn with a custom handler" do
-      with_mock Application, [:passthrough], [get_env: fn _, _ -> @env_handler_values end] do
+      with_mock Application, [:passthrough], get_env: fn _, _ -> @env_handler_values end do
         extra =
           %Plug.Conn{params: %{"code" => "1234"}}
           |> ADFS.handle_callback!()
           |> ADFS.extra()
 
         assert %Ueberauth.Auth.Extra{
-                raw_info: %{
-                  token: %Joken.Token{},
-                  user: %{},
-                  with_handler: true
-                }
-              } = extra
+                 raw_info: %{
+                   token: %Joken.Token{},
+                   user: %{},
+                   with_handler: true
+                 }
+               } = extra
       end
     end
 
@@ -334,13 +317,13 @@ defmodule Ueberauth.Strategy.ADFSTest do
     end
 
     test "Gets the signout url" do
-      assert ADFS.OAuth.signout_url() ==
-               {:ok, "#{@env_values[:adfs_url]}/adfs/ls/?wa=wsignout1.0"}
+      assert ADFS.OAuth.signout_url() == {:ok, "#{@env_values[:adfs_url]}/adfs/oauth2/logout"}
     end
 
     test "Gets the signout url with params" do
-      assert ADFS.OAuth.signout_url(%{redirect_uri: "https://test.com"}) ==
-               {:ok, "#{@env_values[:adfs_url]}/adfs/ls/?wa=wsignout1.0&wreply=https://test.com"}
+      assert ADFS.OAuth.signout_url(%{redirect_uri: "https://test.com", id_token: "ABCD"}) ==
+               {:ok,
+                "#{@env_values[:adfs_url]}/adfs/oauth2/logout?post_logout_redirect_uri=https://test.com&id_token_hint=ABCD"}
     end
 
     test "Fails to get the signout url without config" do

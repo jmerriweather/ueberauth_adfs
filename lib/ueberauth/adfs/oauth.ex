@@ -47,11 +47,23 @@ defmodule Ueberauth.Strategy.ADFS.OAuth do
     with {value, _} when not is_nil(value) <- Keyword.pop(config, :adfs_url) do
       adfs_url = URI.parse(value)
       signout_return_address = Map.get(params, :redirect_uri)
+      id_token = Map.get(params, :id_token, "")
 
       redirect =
         case signout_return_address do
-          nil -> "adfs/ls/?wa=wsignout1.0"
-          address -> "adfs/ls/?wa=wsignout1.0&wreply=#{address}"
+          nil ->
+            "adfs/oauth2/logout"
+
+          address ->
+            case id_token do
+              nil ->
+                "adfs/oauth2/logout?post_logout_redirect_uri=#{URI.encode(address)}"
+
+              id ->
+                "adfs/oauth2/logout?post_logout_redirect_uri=#{URI.encode(address)}&id_token_hint=#{
+                  URI.encode(id)
+                }"
+            end
         end
 
       {

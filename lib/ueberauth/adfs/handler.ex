@@ -1,5 +1,6 @@
 defmodule Ueberauth.Strategy.ADFS.Handler do
   alias Ueberauth.Auth.{Info, Credentials, Extra}
+
   @moduledoc """
   ADFS Handler behaviour.
 
