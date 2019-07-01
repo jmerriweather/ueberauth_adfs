@@ -38,8 +38,15 @@ defmodule Ueberauth.Strategy.ADFS.OAuth do
   def get_token(code, opts \\ []) do
     opts
     |> client()
+    |> put_client_secret()
     |> Client.get_token(code: code)
   end
+
+  defp put_client_secret(client = %{client_secret: client_secret}) when client_secret != nil do
+    client
+    |> put_param(:client_secret, client_secret)
+  end
+  defp put_client_secret(client), do: client
 
   def signout_url(params \\ %{}) do
     config = Application.get_env(:ueberauth, Ueberauth.Strategy.ADFS) || []
