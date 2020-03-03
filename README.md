@@ -38,6 +38,7 @@ Docs can be found at [https://hexdocs.pm/ueberauth_adfs](https://hexdocs.pm/uebe
     adfs_url: System.get_env("ADFS_URL"),
     adfs_handler: MyApp.ADFSHandler, # Optional, ability to provide handler to extract information from the token claims
     client_id: System.get_env("ADFS_CLIENT_ID"),
+    client_secret: System.get_env("ADFS_CLIENT_SECRET"), # Optional
     resource_identifier: System.get_env("RESOURCE_IDENTIFIER")
   ```
 
