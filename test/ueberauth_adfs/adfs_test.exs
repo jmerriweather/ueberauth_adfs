@@ -58,6 +58,18 @@ defmodule Ueberauth.Strategy.ADFSTest do
       :ok
     end
 
+    test "Handles otp_app as a configuration" do
+      otp_app = :my_otp_app
+
+      with_mock Application, [:passthrough], get_env: fn ^otp_app, _ -> @env_values end do
+        client = ADFS.OAuth.client(otp_app: otp_app)
+
+        assert client.client_id == @env_values[:client_id]
+        assert client.authorize_url == "#{@env_values[:adfs_url]}/adfs/oauth2/authorize"
+        assert client.token_url == "#{@env_values[:adfs_url]}/adfs/oauth2/token"
+      end
+    end
+
     test "Handles the ADFS request" do
       request = ADFS.handle_request!(%Plug.Conn{params: %{}})
 

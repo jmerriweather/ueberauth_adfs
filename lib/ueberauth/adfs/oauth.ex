@@ -13,8 +13,8 @@ defmodule Ueberauth.Strategy.ADFS.OAuth do
     request_opts: [ssl_options: [versions: [:"tlsv1.2"]]]
   ]
 
-  def client(opts \\ []) do
-    config = Application.get_env(:ueberauth, Ueberauth.Strategy.ADFS) || []
+  def client(opts \\ [otp_app: :ueberauth]) do
+    config = Application.get_env(Keyword.get(opts, :otp_app), Ueberauth.Strategy.ADFS) || []
 
     with {value, new_config} when not is_nil(value) <- Keyword.pop(config, :adfs_url) do
       adfs_url = URI.parse(value)
