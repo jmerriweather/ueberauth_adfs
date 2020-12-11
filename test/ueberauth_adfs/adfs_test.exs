@@ -14,7 +14,6 @@ defmodule Ueberauth.Strategy.ADFSTest do
               client_id: "example_client",
               resource_identifier: "example_resource"
 
-
   @env_handler_values adfs_url: "https://example.com",
                       adfs_metadata_url: "https://example.com/metadata.xml",
                       adfs_handler: Ueberauth.Strategy.ADFSTestHandler,
@@ -250,58 +249,58 @@ defmodule Ueberauth.Strategy.ADFSTest do
     end
 
     test "Gets the credential info from the conn with a custom handler" do
-      with_mock Application, [:passthrough], [get_env: fn _, _ -> @env_handler_values end] do
+      with_mock Application, [:passthrough], get_env: fn _, _ -> @env_handler_values end do
         credentials =
           %Plug.Conn{params: %{"code" => "1234"}}
           |> ADFS.handle_callback!()
           |> ADFS.credentials()
 
         assert credentials == %Ueberauth.Auth.Credentials{
-                other: %{handler: true}
-              }
+                 other: %{handler: true}
+               }
       end
     end
 
     test "Gets the user info from the conn with a custom handler" do
-      with_mock Application, [:passthrough], [get_env: fn _, _ -> @env_handler_values end] do
+      with_mock Application, [:passthrough], get_env: fn _, _ -> @env_handler_values end do
         info =
           %Plug.Conn{params: %{"code" => "1234"}}
           |> ADFS.handle_callback!()
           |> ADFS.info()
 
         assert info == %Ueberauth.Auth.Info{
-                name: "John Doe",
-                nickname: "john1",
-                email: "user@test.com",
-                location: "handler"
-              }
+                 name: "John Doe",
+                 nickname: "john1",
+                 email: "user@test.com",
+                 location: "handler"
+               }
       end
     end
 
     test "Gets the extra info from the conn with a custom handler" do
-      with_mock Application, [:passthrough], [get_env: fn _, _ -> @env_handler_values end] do
+      with_mock Application, [:passthrough], get_env: fn _, _ -> @env_handler_values end do
         extra =
           %Plug.Conn{params: %{"code" => "1234"}}
           |> ADFS.handle_callback!()
           |> ADFS.extra()
 
         assert %Ueberauth.Auth.Extra{
-                raw_info: %{
-                  token: %Joken.Token{},
-                  user: %{},
-                  with_handler: true
-                }
-              } = extra
+                 raw_info: %{
+                   token: %Joken.Token{},
+                   user: %{},
+                   with_handler: true
+                 }
+               } = extra
       end
     end
 
     test "Returns the configured status when env is present" do
-      assert ADFS.configured?() == true
+      assert ADFS.configured?(otp_app: :ueberauth) == true
     end
 
     test "Returns the configured status when env is not present" do
       with_mock Application, [:passthrough], get_env: fn _, _ -> nil end do
-        assert ADFS.configured?() == false
+        assert ADFS.configured?(otp_app: :ueberauth) == false
       end
     end
 
@@ -309,7 +308,7 @@ defmodule Ueberauth.Strategy.ADFSTest do
       with_mock Application,
                 [:passthrough],
                 get_env: fn _, _ -> [adfs_url: "https://test.com"] end do
-        assert ADFS.configured?() == false
+        assert ADFS.configured?(otp_app: :ueberauth) == false
       end
     end
   end

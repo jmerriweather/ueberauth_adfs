@@ -75,12 +75,12 @@ defmodule Ueberauth.Strategy.ADFS do
 
   import SweetXml
 
-  use Ueberauth.Strategy
+  use Ueberauth.Strategy, otp_app: :ueberauth
 
   alias Ueberauth.Strategy.ADFS.OAuth
 
   def handle_request!(conn) do
-    if __MODULE__.configured?() do
+    if conn |> option(:otp_app) |> __MODULE__.configured?() do
       redirect_to_authorization(conn)
     else
       redirect!(conn, "/")
@@ -90,7 +90,7 @@ defmodule Ueberauth.Strategy.ADFS do
   def logout(conn, token) do
     params = %{redirect_uri: callback_url(conn), token: token}
 
-    with {:ok, signout_url} <- OAuth.signout_url(params) do
+    with {:ok, signout_url} <- OAuth.signout_url(params, otp_app: option(conn, :otp_app)) do
       redirect!(conn, signout_url)
     else
       _ ->
@@ -99,7 +99,8 @@ defmodule Ueberauth.Strategy.ADFS do
   end
 
   def handle_callback!(%Plug.Conn{params: %{"code" => code}} = conn) do
-    with {:ok, client} <- OAuth.get_token(code, redirect_uri: callback_url(conn)) do
+    with {:ok, client} <-
+           OAuth.get_token(code, redirect_uri: callback_url(conn), otp_app: option(conn, :otp_app)) do
       fetch_user(conn, client)
     else
       {:error, %{reason: reason}} ->
@@ -148,16 +149,17 @@ defmodule Ueberauth.Strategy.ADFS do
     apply(conn.private.adfs_handler, :extra, [conn])
   end
 
-  def configured? do
-    :ueberauth
+  def configured?(otp_app) do
+    otp_app
     |> Application.get_env(__MODULE__)
     |> env_present?
   end
 
   defp fetch_user(conn, %{token: %{access_token: access_token}}) do
-    url = config(:adfs_metadata_url)
+    url = config(:adfs_metadata_url, option(conn, :otp_app))
 
-    adfs_handler = config(:adfs_handler) || Ueberauth.Strategy.ADFS.DefaultHandler
+    adfs_handler =
+      config(:adfs_handler, option(conn, :otp_app)) || Ueberauth.Strategy.ADFS.DefaultHandler
 
     conn = put_private(conn, :adfs_handler, adfs_handler)
 
@@ -212,8 +214,8 @@ defmodule Ueberauth.Strategy.ADFS do
     Keyword.get(options(conn), key, Keyword.get(default_options(), key))
   end
 
-  defp config(option) do
-    :ueberauth
+  defp config(option, otp_app) do
+    otp_app
     |> Application.get_env(__MODULE__)
     |> Keyword.get(option)
   end
@@ -221,8 +223,11 @@ defmodule Ueberauth.Strategy.ADFS do
   defp redirect_to_authorization(conn) do
     authorize_url =
       conn.params
-      |> Map.put(:resource, config(:resource_identifier))
-      |> Map.put(:redirect_uri, callback_url(conn))
+      |> Map.drop(["provider"])
+      |> Enum.into([])
+      |> Keyword.put(:resource, config(:resource_identifier, option(conn, :otp_app)))
+      |> Keyword.put(:redirect_uri, callback_url(conn))
+      |> Keyword.put(:otp_app, option(conn, :otp_app))
       |> OAuth.authorize_url!()
 
     redirect!(conn, authorize_url)
